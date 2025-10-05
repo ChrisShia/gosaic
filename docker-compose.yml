@@ -1,0 +1,58 @@
+services:
+
+  broker-service:
+    build:
+      context: ./broker-service
+      dockerfile: broker-service.dockerfile
+    ports:
+      - "4000:4000"
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1
+    environment:
+      PORT: 4000
+
+  mosaic-service:
+    build:
+      context: ./mosaic-service
+      dockerfile: mosaic-service.dockerfile
+    ports:
+      - "4001:80"
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1
+    environment:
+      REDIS_URL: "redis://redis:6379"
+
+  downloader-service:
+    build:
+      context: ./downloader-service
+      dockerfile: downloader-service.dockerfile
+    ports:
+      - "4002:80"
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1
+    environment:
+      NATS_URL: "nats://nats:4222"
+      REDIS_URL: "redis://redis:6379"
+#      MOSAIC_URL: "mosaic://mosaic:4001"
+
+  redis:
+    image: 'redis:8.2-alpine'
+    ports:
+      - "6379:6379"
+#    volumes:
+#      - ./redis-data:/var/lib/redis/data/
+
+  nats:
+    image: 'nats:2.12.0-alpine3.22'
+    ports:
+      - "4222:4222"
+
+networks:
+  default:
+    name: mosaic

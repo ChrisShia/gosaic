@@ -55,9 +55,8 @@ func (d *Downloader) DownloadN(natsClient *nats.Conn, requestorIp string, n int,
 	wg.Add(n)
 
 	_, err := natsClient.Subscribe("downloads", func(msg *nats.Msg) {
-		defer wg.Done()
-
 		go func() {
+			defer wg.Done()
 			d.Store(requestorIp, msg.Data)
 		}()
 	})
@@ -65,24 +64,32 @@ func (d *Downloader) DownloadN(natsClient *nats.Conn, requestorIp string, n int,
 		d.logger.PrintError(err, nil)
 	}
 
-	mod := n % chunkSize
-	chunks := n / chunkSize
-	for i := chunks; i > 0; i-- {
-		go func() {
-			for j := 1; j < chunkSize; j++ {
-				d.Get(natsClient, request)
-			}
-		}()
+	chunks, mod := chunksAndRemainder(n)
+
+	if chunks > 0 {
+		for i := chunks; i > 0; i-- {
+			go func() {
+				for j := 1; j <= chunkSize; j++ {
+					d.Get(natsClient, request)
+				}
+			}()
+		}
 	}
-	if mod > 0 {
+	if n > chunkSize && mod > 0 {
 		go func() {
-			for j := 1; j < mod; j++ {
+			for j := 1; j <= mod; j++ {
 				d.Get(natsClient, request)
 			}
 		}()
 	}
 
 	wg.Wait()
+}
+
+func chunksAndRemainder(n int) (int, int) {
+	mod := n % chunkSize
+	chunks := n / chunkSize
+	return chunks, mod
 }
 
 func (d *Downloader) Get(nc *nats.Conn, req *http.Request) {

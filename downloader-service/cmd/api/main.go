@@ -1,12 +1,11 @@
 package main
 
 import (
-	"context"
+	"downloader/cmd/internal"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/ChrisShia/jsonlog"
 	"github.com/nats-io/nats.go"
@@ -111,7 +110,7 @@ func createTargetDir() {
 func (app *App) connectToRedis(cfg Config) (func(), error) {
 	counts := 0
 	for {
-		client, err := establishRedisConnAndPing(cfg)
+		client, err := internal.EstablishRedisConnAndPing(cfg.Redis.Addr)
 		if err != nil {
 			counts++
 		} else {
@@ -128,54 +127,6 @@ func (app *App) connectToRedis(cfg Config) (func(), error) {
 	}
 }
 
-func establishRedisConnAndPing(cfg Config) (*redis.Client, error) {
-	client, err := redisClient(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	timeout, cancelFunc := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelFunc()
-	if err = client.Ping(timeout).Err(); err != nil {
-		return nil, err
-	}
-
-	return client, nil
-}
-
-func redisClient(cfg Config) (*redis.Client, error) {
-	opt, err := redis.ParseURL(cfg.Redis.Addr)
-	if err != nil {
-		return nil, err
-	}
-
-	client := redis.NewClient(opt)
-	return client, nil
-}
-
-func (app *App) redisFTCREATE(ip string) {
-	//options := redis.FTCreateOptions{
-	//	OnHash: true,
-	//	Prefix: []any{"img"},
-	//}
-	//app.cfg.Redis.Client.FTCreate()
-
-	_, err := app.cfg.Redis.Client.Do(context.Background(),
-		"FT.CREATE",
-		"img_idx",
-		"ON",
-		"HASH",
-		"PREFIX", "1", app.redisIndexPrefix(ip),
-		"SCHEMA", "avg_color", "VECTOR", "HNSW", "6",
-		"TYPE", "FLOAT64",
-		"DIM", "3",
-		"DISTANCE_METRIC", "L2",
-	).Result()
-	if err != nil {
-		// ignore error if index already exists
-	}
-}
-
 func (app *App) redisIndexPrefix(ip string) string {
-	return fmt.Sprintf("img:%s:", ip)
+	return fmt.Sprintf("img:%s", ip)
 }

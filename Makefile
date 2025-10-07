@@ -11,6 +11,13 @@ up/build: dl/build mosaic/build
 	docker-compose up --build -d
 	@echo "Docker images started!"
 
+## down:
+.PHONY: down
+down:
+	@echo "Stopping docker images..."
+	docker-compose down
+	@echo "Done"
+
 
 #BROKER-SERVICE ###
 
@@ -101,3 +108,20 @@ nats:
 	@echo "Starting redis docker image..."
 	docker-compose up -d nats
 	@echo "Started docker image!"
+
+
+
+# TEST ENV ###
+## redis/test: Start redis test docker container
+.PHONY: redis/test
+redis/test:
+	@echo "Starting redis test docker container"
+	docker run -d --rm --name redis-test -p 6378:6379 redis:8.2-alpine
+	@echo "Started redis test container!"
+
+## redis/test: Start redis test docker container
+.PHONY: redis/test/down
+redis/test/down:
+	@echo "Stopping redis test container"
+	docker stop redis-test
+	@echo "Done"

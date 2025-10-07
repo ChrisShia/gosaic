@@ -38,6 +38,12 @@ func (app *App) mosaicHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	err = dec.Decode(&struct{}{})
+	if err != io.EOF {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		//TODO: use json helper for errors...along with jsonResponse struct{}
@@ -59,15 +65,9 @@ func (app *App) mosaicHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = randomTilesMosaicCreateRequest(host, payload.TileWidth)
+	err = app.randomTilesMosaicCreateRequest(host, payload.TileWidth)
 	if err != nil {
 		//TODO: specialize error handling
-		return
-	}
-
-	err = dec.Decode(&struct{}{})
-	if err != io.EOF {
-		app.badRequestResponse(w, r, err)
 		return
 	}
 }
@@ -81,7 +81,7 @@ func Image(r io.Reader) (image.Image, error) {
 	return img, nil
 }
 
-func randomTilesMosaicCreateRequest(ip string, tileWidth int) error {
+func (app *App) randomTilesMosaicCreateRequest(ip string, tileWidth int) error {
 	var mp = MosaicPayload{
 		IP:        ip,
 		TileWidth: tileWidth,
@@ -92,7 +92,7 @@ func randomTilesMosaicCreateRequest(ip string, tileWidth int) error {
 		return err
 	}
 
-	logServiceURL := "http://mosaic-service/create"
+	logServiceURL := app.service("mosaic")
 
 	request, err := http.NewRequest(http.MethodPost, logServiceURL, bytes.NewBuffer(jsonData))
 	if err != nil {

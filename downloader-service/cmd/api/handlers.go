@@ -43,7 +43,7 @@ func (app *App) DownloadNRandomPicsFromPicSumHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	app.redisFTCREATE(requestData.IP)
+	internal.RedisFTCREATE("average_color_index", app.cfg.Redis.Client, app.redisIndexPrefix(requestData.IP))
 
 	d.DownloadN(app.cfg.Nats.Client, requestData.IP, requestData.N, picSumRandomPicRequest)
 }
@@ -109,8 +109,6 @@ func (app *App) saveToRedis(ip string, from io.Reader) {
 		Img:          imgString,
 		AverageColor: avColorBinary,
 	}
-
-	app.logger.PrintInfo(imgString, nil)
 
 	//NOTE:
 	//create another entry in redis to keep track of the counter assigned

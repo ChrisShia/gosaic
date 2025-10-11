@@ -38,8 +38,7 @@ func saveToRedis(img image.Image, c *redis.Client, ip string, indexPrefix string
 		AverageColor: avColorBinary,
 	}
 
-	counterKey := ip + ":counter"
-	//counterKey := fmt.Sprintf("%s:counter", ip)
+	counterKey := fmt.Sprintf("%s:counter", ip)
 
 	id, err := c.Incr(ctx, counterKey).Result()
 	if err != nil {
@@ -75,7 +74,9 @@ func imageToBase64String(img image.Image) (string, error) {
 		return "", err
 	}
 
-	return base64.StdEncoding.EncodeToString(imgBuf.Bytes()), nil
+	base64Str := base64.StdEncoding.EncodeToString(imgBuf.Bytes())
+
+	return base64Str, nil
 }
 
 func RedisFTCREATE(indexName string, c *redis.Client, indexPrefix string) {
@@ -94,6 +95,27 @@ func RedisFTCREATE(indexName string, c *redis.Client, indexPrefix string) {
 			log.Fatalf("FTCreate failed: %s", err)
 		}
 	}
+}
+
+func RedisFTSEARCH(searchFor [3]float64, indexName string, c *redis.Client) (interface{}, error) {
+	searchForBinary, err := binaryFloat64bit(searchFor)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := c.Do(context.Background(),
+		"FT.SEARCH", indexName,
+		"*=>[KNN 5 @average_color $vec]",
+		"PARAMS", "2", "vec", searchForBinary,
+		"SORTBY", "average_color",
+		"RETURN", "2", "img", "average_color",
+		"DIALECT", "2",
+	).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func EstablishRedisConnAndPing(addr string) (*redis.Client, error) {
@@ -121,17 +143,6 @@ func RedisClient(addr string) (*redis.Client, error) {
 	return client, nil
 }
 
-var mapIdentifier = []byte("map[")
-
-func stripFirstMapIdentifier(results []byte) []byte {
-	firstInstanceIndex := bytes.Index(results, mapIdentifier)
-	if firstInstanceIndex != 0 {
-		return nil
-	}
-
-	return results[len(mapIdentifier) : len(results)-1]
-}
-
 func splitFields(v []byte) <-chan []byte {
 	out := make(chan []byte)
 
@@ -139,7 +150,7 @@ func splitFields(v []byte) <-chan []byte {
 		defer close(out)
 		remainder := v
 		for len(remainder) > 0 {
-			keyValue, rem := firstAvailable(remainder)
+			keyValue, rem := FirstInLineKeyValue(remainder)
 			remainder = rem
 			out <- keyValue
 		}
@@ -148,27 +159,152 @@ func splitFields(v []byte) <-chan []byte {
 	return out
 }
 
-func firstAvailable(s []byte) ([]byte, []byte) {
+func RedisResults(s []byte) []*Result {
+	allResults, _ := redisResultsField(s)
+
+	return Results(allResults)
+}
+
+func Results(s []byte) []*Result {
+	r := make([]*Result, 0)
+
+	for res := range bridge(resultsStream(s, nil), nil) {
+		r = append(r, res)
+	}
+
+	return r
+}
+
+func bridge(chanStream <-chan <-chan *Result, done <-chan struct{}) <-chan *Result {
+	out := make(chan *Result)
+
+	go func() {
+		defer close(out)
+		for {
+			var stream <-chan *Result
+			select {
+			case v, ok := <-chanStream:
+				if !ok {
+					return
+				}
+				stream = v
+			case <-done:
+				return
+			}
+
+			for v := range stream {
+				select {
+				case out <- v:
+				case <-done:
+					return
+				}
+			}
+		}
+	}()
+
+	return out
+}
+
+func resultsStream(s []byte, done <-chan struct{}) <-chan <-chan *Result {
+	mapIdentifier := "map"
+	f := func(bs []byte) (int, int) {
+		return 0, bytes.Index(bs, []byte(mapIdentifier)) + len(mapIdentifier)
+	}
+	outQueue := queuedStreamsFunc(s, f, done)
+
+	out := make(chan (<-chan *Result))
+	go func() {
+		defer close(out)
+		for _, c := range outQueue {
+			out <- c
+		}
+	}()
+
+	return out
+}
+
+func queuedStreamsFunc(s []byte, f func(bs []byte) (int, int), done <-chan struct{}) []<-chan *Result {
+	outQueue := make([]<-chan *Result, 0)
+
+	s = s[1 : len(s)-1]
+
+	keyValue := make([]byte, 0)
+	for len(s) > 0 {
+		if len(s) == 0 {
+			break
+		}
+
+		keyValue, s = firstAvailableFunc(s, f)
+
+		c := make(chan *Result)
+		outQueue = append(outQueue, c)
+		go func(kv []byte, o chan<- *Result) {
+			defer close(o)
+			select {
+			case o <- NewResult(kv):
+			case <-done:
+				return
+			}
+		}(keyValue, c)
+	}
+
+	return outQueue
+}
+
+type Result struct {
+	Attributes string
+	//Attributes map[string]string
+}
+
+func NewResult(s []byte) *Result {
+	//m := make(map[string]string)
+
+	return &Result{
+		Attributes: string(s),
+	}
+}
+
+func redisResultsField(s []byte) ([]byte, []byte) {
+	f := func(bs []byte) (int, int) {
+		identifier := []byte("results:")
+		i := bytes.Index(s, identifier)
+		if i == -1 {
+			return -1, -1
+		}
+		return i, i + len(identifier)
+	}
+
+	return firstAvailableFunc(s, f)
+}
+
+func FirstInLineKeyValue(s []byte) ([]byte, []byte) {
+	f := func(bs []byte) (int, int) {
+		return 0, bytes.IndexByte(bs, ':') + 1
+	}
+
+	return firstAvailableFunc(s, f)
+}
+
+func firstAvailableFunc(s []byte, f func(bs []byte) (int, int)) ([]byte, []byte) {
 	if len(s) == 0 {
 		return []byte{}, []byte{}
 	}
 
-	i := bytes.IndexRune(s, ':')
-	if i == -1 {
+	identifierStart, valueStart := f(s)
+	if identifierStart == -1 {
 		return []byte{}, []byte{}
 	}
 
-	valueStart := i + 1
 	valueEnd := findValueEnd(s, valueStart)
+	keyValue := s[identifierStart : valueEnd+1]
 
-	keyValue := s[:valueEnd+1]
-
-	s = bytes.TrimLeft(s[valueEnd+1:], " ")
-	return keyValue, s
+	remainder := bytes.TrimLeft(s[valueEnd+1:], " ")
+	return keyValue, remainder
 }
 
 func findValueEnd(s []byte, start int) int {
 	var end int
+
 	switch {
 	case isBra(s[start]):
 		end = matchingKetIndex(s, start)
@@ -186,26 +322,4 @@ func indexBeforeFirstWhiteSpaceOrEndOfSequence(s []byte) int {
 	}
 
 	return firstWhiteSpace - 1
-}
-
-type RR struct {
-	attributes   []string
-	format       string
-	results      []map[string]any
-	totalResults string
-	warning      string
-}
-
-type keyValueString struct {
-	key   string
-	value string
-}
-
-type keyValueMap struct {
-	key   string
-	value string
-}
-
-type result struct {
-	extraAttributes map[string]any
 }

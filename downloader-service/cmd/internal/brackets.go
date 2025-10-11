@@ -1,5 +1,9 @@
 package internal
 
+import (
+	"unicode/utf8"
+)
+
 type bra byte
 type ket byte
 
@@ -35,6 +39,12 @@ func isBra(b byte) bool {
 	return ok
 }
 
+func isBraRune(r rune) bool {
+	b := byte(r)
+	_, ok := matchingBrackets[bra(b)]
+	return ok
+}
+
 func isKet(b byte) bool {
 	for _, k := range matchingBrackets {
 		if byte(k) == b {
@@ -58,6 +68,7 @@ func (bs *bracketStack) push(b byte) int {
 	return len(*bs)
 }
 
+/* TIP Fails if the byte slice originates from a string of characters >= utf8.RuneSelf*/
 func matchingKetIndex(s []byte, index int) int {
 	if !isBra(s[index]) {
 		return -1
@@ -69,6 +80,37 @@ func matchingKetIndex(s []byte, index int) int {
 	depth := 0
 	for i, c := range s[index:] {
 		depth = stack.push(c)
+		if depth == 0 {
+			matchingKetIndx += i
+			break
+		}
+	}
+
+	if matchingKetIndx == index {
+		return -1
+	}
+
+	return matchingKetIndx
+}
+
+func matchingKetIndexRune(s []rune, index int) int {
+	r := s[index]
+	if r >= utf8.RuneSelf {
+		return -1
+	}
+	b := byte(r)
+	if !isBra(b) {
+		return -1
+	}
+
+	stack := bracketStack(make([]bra, 0))
+	matchingKetIndx := index
+	depth := 0
+	for i, c := range s[index:] {
+		if c >= utf8.RuneSelf {
+			continue
+		}
+		depth = stack.push(byte(c))
 		if depth == 0 {
 			matchingKetIndx += i
 			break

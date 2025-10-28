@@ -23,10 +23,12 @@ const redisTestURL = "redis://localhost:6378"
 func Test_RedisHGetAll(t *testing.T) {
 	redisClient, closer := redisTestClient()
 	defer closer()
-	indexPrefix := "img"
-	ip := "0.0.0.0"
 
-	RedisFTCREATE("average_color_index", redisClient, indexPrefix)
+	ip := "0.0.0.0"
+	indexPrefix := "img" + ip
+
+	redisIndex := NewRedisIndex(ip, indexPrefix, redisClient)
+	redisIndex.FTCREATE()
 
 	testImg := testImage()
 
@@ -35,12 +37,12 @@ func Test_RedisHGetAll(t *testing.T) {
 		t.Errorf("Error calculating average color: %v", err)
 	}
 
-	err = saveToRedis(testImg, redisClient, ip, indexPrefix, averageColor, context.Background())
+	err = SaveToRedis(testImg, redisClient, ip, indexPrefix, averageColor, context.Background())
 	if err != nil {
 		t.Error(err)
 	}
 
-	result, err := redisClient.HGetAll(context.Background(), dbKey(indexPrefix, ip, 1)).Result()
+	result, err := redisClient.HGetAll(context.Background(), dbKey(indexPrefix, 1)).Result()
 	if err != nil {
 		t.Error(err)
 	}
@@ -57,12 +59,12 @@ func Test_RedisHGetAll(t *testing.T) {
 func Test_RedisDoFTSearch(t *testing.T) {
 	redisClient, closer := redisTestClient()
 	defer closer()
-	indexPrefix := "img"
+
 	ip := "0.0.0.0"
+	indexPrefix := fmt.Sprintf("%s:img", ip)
 
-	indexName := "average_color_index"
-
-	RedisFTCREATE(indexName, redisClient, indexPrefix)
+	redisIndex := NewRedisIndex(ip, indexPrefix, redisClient)
+	redisIndex.FTCREATE()
 
 	testImg := testImage()
 
@@ -71,12 +73,12 @@ func Test_RedisDoFTSearch(t *testing.T) {
 		t.Errorf("Error calculating average color: %v", err)
 	}
 
-	err = saveToRedis(testImg, redisClient, ip, indexPrefix, averageColor, context.Background())
+	err = SaveToRedis(testImg, redisClient, ip, indexPrefix, averageColor, context.Background())
 	if err != nil {
 		t.Error(err)
 	}
 
-	redisDoResult, err := RedisFTSEARCH(expectedAverageColorVector, indexName, redisClient)
+	redisDoResult, err := redisIndex.FTSEARCH(expectedAverageColorVector, redisClient)
 	if err != nil {
 		t.Error(err)
 	}
@@ -96,8 +98,8 @@ func Test_RedisDoFTSearch(t *testing.T) {
 			t.Errorf("expected %v, got %v", expectedAverageColorVector[i], f)
 		}
 	}
-
 	actualImg := firstResultExtraAttributesMap["img"]
+
 	if actualImg == nil {
 		t.Error("Expected an image")
 	}
@@ -376,7 +378,8 @@ func Test_RedisFTSearch(t *testing.T) {
 
 	indexName := "average_color_index"
 
-	RedisFTCREATE(indexName, redisClient, indexPrefix)
+	index := NewRedisIndex(indexName, indexPrefix, redisClient)
+	index.FTCREATE()
 
 	testImg := testImage()
 
@@ -390,7 +393,7 @@ func Test_RedisFTSearch(t *testing.T) {
 		t.Errorf("Error calculating binary representation of expected average color: %v", err)
 	}
 
-	err = saveToRedis(testImg, redisClient, ip, indexPrefix, averageColor, context.Background())
+	err = SaveToRedis(testImg, redisClient, ip, indexPrefix, averageColor, context.Background())
 	if err != nil {
 		t.Error(err)
 	}

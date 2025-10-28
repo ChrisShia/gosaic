@@ -55,9 +55,10 @@ func (app *App) mosaicHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//TODO: the following calc is relevant only to the case of square tile images.
+	//NOTE: approximate
 	dx := originalImg.Bounds().Dx() / payload.TileWidth
-	tilesNeeded := dx * dx
+	dy := originalImg.Bounds().Dy() / payload.TileWidth
+	tilesNeeded := dx * dy
 
 	err = app.downloadRandomNRequest(host, tilesNeeded)
 	if err != nil {

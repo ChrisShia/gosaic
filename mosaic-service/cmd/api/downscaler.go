@@ -1,8 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"image"
 	"image/color"
+	"image/png"
+	"io"
+
+	"gocv.io/x/gocv"
 )
 
 func resizeByNearestNeighbour(inputImg image.Image, newWidth int) image.NRGBA {
@@ -12,8 +18,8 @@ func resizeByNearestNeighbour(inputImg image.Image, newWidth int) image.NRGBA {
 	y0 := bounds.Min.X / scalingFactor
 	x1 := bounds.Max.X / scalingFactor
 	y1 := bounds.Max.Y / scalingFactor
-	out := image.NewNRGBA(image.Rect(x0, y0, x1, y1))
 
+	out := image.NewNRGBA(image.Rect(x0, y0, x1, y1))
 	for j, y := bounds.Min.Y, bounds.Min.Y; y < bounds.Max.Y; j, y = j+1, y+scalingFactor {
 		for i, x := bounds.Min.X, bounds.Min.X; x < bounds.Max.X; i, x = i+1, x+scalingFactor {
 			r, g, b, a := inputImg.At(x, y).RGBA()
@@ -63,4 +69,70 @@ func resizeByAveragePooling(inputImg image.Image, newWidth int) image.NRGBA {
 	}
 
 	return *out
+}
+
+func resizeByBilinear(inputImg image.Image, newWidth int) image.NRGBA {
+	bounds := inputImg.Bounds()
+	scaleFactor := bounds.Dx() / newWidth
+	x0 := bounds.Min.X / scaleFactor
+	y0 := bounds.Min.X / scaleFactor
+	x1 := bounds.Max.X / scaleFactor
+	y1 := bounds.Max.Y / scaleFactor
+	out := image.NewNRGBA(image.Rect(x0, y0, x1, y1))
+	for j, y := 0, bounds.Min.Y; y < bounds.Max.Y; j, y = j+1, y+scaleFactor {
+		for i, x := 0, bounds.Min.X; x < bounds.Max.X; i, x = i+1, x+scaleFactor {
+
+			//TODO: Implement
+
+		}
+	}
+
+	return *out
+}
+
+func ResizeGoCV(img image.Image, scaleFactor float64, interpolation gocv.InterpolationFlags) (*image.RGBA, error) {
+	encoder := func(w io.Writer, img image.Image) error {
+		return png.Encode(w, img)
+	}
+	imgBytesBuf, err := imageToBuffer(img, encoder)
+	if err != nil {
+		return &image.RGBA{}, err
+	}
+
+	mat, err := gocv.IMDecode(imgBytesBuf.Bytes(), gocv.IMReadColor)
+	if err != nil {
+		return &image.RGBA{}, err
+	}
+
+	resized := gocv.NewMat()
+	err = gocv.Resize(mat, &resized, image.Point{}, scaleFactor, scaleFactor, interpolation)
+	if err != nil {
+		return &image.RGBA{}, err
+	}
+
+	resizedImg, err := resized.ToImage()
+	if err != nil {
+		return &image.RGBA{}, err
+	}
+
+	var resizedRGBA *image.RGBA
+
+	switch resizedImg.(type) {
+	case *image.RGBA:
+		resizedRGBA = resizedImg.(*image.RGBA)
+	default:
+		return nil, errors.New("resized image is not a NRGBA")
+	}
+
+	return resizedRGBA, nil
+}
+
+func imageToBuffer(img image.Image, encoder func(io.Writer, image.Image) error) (*bytes.Buffer, error) {
+	imgBuf := new(bytes.Buffer)
+
+	err := encoder(imgBuf, img)
+	if err != nil {
+		return nil, err
+	}
+	return imgBuf, nil
 }

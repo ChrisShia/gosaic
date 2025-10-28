@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"io"
 	"log"
 	"math"
 	"time"
@@ -15,7 +16,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func saveToRedis(img image.Image, c *redis.Client, ip string, indexPrefix string, indexer func(image.Image) ([3]float64, error), ctx context.Context) error {
+func SaveToRedis(img image.Image, c *redis.Client, ip, indexPrefix string, indexer func(image.Image) ([3]float64, error), ctx context.Context) error {
 	float64Vector, err := indexer(img)
 	if err != nil {
 		return err
@@ -45,7 +46,7 @@ func saveToRedis(img image.Image, c *redis.Client, ip string, indexPrefix string
 		return err
 	}
 
-	key := dbKey(indexPrefix, ip, id)
+	key := dbKey(indexPrefix, id)
 
 	if err = c.HSet(ctx, key, data).Err(); err != nil {
 		return err
@@ -54,8 +55,8 @@ func saveToRedis(img image.Image, c *redis.Client, ip string, indexPrefix string
 	return nil
 }
 
-func dbKey(indexPrefix string, ip string, id int64) string {
-	return fmt.Sprintf("%s:%s:%d", indexPrefix, ip, id)
+func dbKey(indexPrefix string, id int64) string {
+	return fmt.Sprintf("%s:%d", indexPrefix, id)
 }
 
 func binaryFloat64bit(indexVector [3]float64) ([]byte, error) {
@@ -68,8 +69,11 @@ func binaryFloat64bit(indexVector [3]float64) ([]byte, error) {
 }
 
 func imageToBase64String(img image.Image) (string, error) {
-	imgBuf := new(bytes.Buffer)
-	err := jpeg.Encode(imgBuf, img, nil)
+	jpegEncoder := func(w io.Writer, img image.Image) error {
+		return jpeg.Encode(w, img, nil)
+	}
+
+	imgBuf, err := imageToBytes(img, jpegEncoder)
 	if err != nil {
 		return "", err
 	}
@@ -79,11 +83,36 @@ func imageToBase64String(img image.Image) (string, error) {
 	return base64Str, nil
 }
 
-func RedisFTCREATE(indexName string, c *redis.Client, indexPrefix string) {
-	_, err := c.Do(context.Background(),
-		"FT.CREATE", indexName,
+func imageToBytes(img image.Image, encoder func(io.Writer, image.Image) error) (*bytes.Buffer, error) {
+	imgBuf := new(bytes.Buffer)
+
+	err := encoder(imgBuf, img)
+	if err != nil {
+		return nil, err
+	}
+	return imgBuf, nil
+}
+
+type RedisIndex struct {
+	Name   string
+	Prefix string
+	Client *redis.Client
+}
+
+func NewRedisIndex(name string, prefix string, client *redis.Client) *RedisIndex {
+	return &RedisIndex{
+		Name:   name,
+		Prefix: prefix,
+		Client: client,
+	}
+}
+
+// FTCREATE TODO: error propagation
+func (ri *RedisIndex) FTCREATE() {
+	_, err := ri.Client.Do(context.Background(),
+		"FT.CREATE", ri.Name,
 		"ON", "HASH",
-		"PREFIX", "1", indexPrefix,
+		"PREFIX", "1", ri.Prefix,
 		"SCHEMA", "average_color", "VECTOR", "HNSW", "6",
 		"TYPE", "FLOAT64",
 		"DIM", "3",
@@ -97,14 +126,14 @@ func RedisFTCREATE(indexName string, c *redis.Client, indexPrefix string) {
 	}
 }
 
-func RedisFTSEARCH(searchFor [3]float64, indexName string, c *redis.Client) (interface{}, error) {
+func (ri *RedisIndex) FTSEARCH(searchFor [3]float64, c *redis.Client) (interface{}, error) {
 	searchForBinary, err := binaryFloat64bit(searchFor)
 	if err != nil {
 		return nil, err
 	}
 
 	result, err := c.Do(context.Background(),
-		"FT.SEARCH", indexName,
+		"FT.SEARCH", ri.Name,
 		"*=>[KNN 5 @average_color $vec]",
 		"PARAMS", "2", "vec", searchForBinary,
 		"SORTBY", "average_color",

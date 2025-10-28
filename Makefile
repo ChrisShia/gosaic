@@ -5,7 +5,7 @@ help:
 
 # UNIVERSE ###
 
-## build/up:
+## up/build:
 .PHONY: up/build
 up/build: dl/build mosaic/build
 	@echo "Stopping docker images (if running)..."
@@ -122,7 +122,7 @@ redis/test:
 	docker run -d --rm --name redis-test -p 6378:6379 redis:8.2-alpine
 	@echo "Started redis test container!"
 
-## redis/test: Start redis test docker container
+## redis/test/down: Stop redis test container
 .PHONY: redis/test/down
 redis/test/down:
 	@echo "Stopping redis test container"

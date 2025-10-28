@@ -1,17 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"downloader/picsum"
-	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"image"
-	"image/jpeg"
 	"io"
-	"math"
 	"net/http"
 	"os"
 
@@ -20,8 +14,6 @@ import (
 
 func (app *App) DownloadNRandomPicsFromPicSumHandler(w http.ResponseWriter, r *http.Request) {
 	//TODO: http.MaxBytesReader
-
-	d := internal.NewDownloader(app.saveToRedis, app.logger)
 
 	picSumRandomPicRequest := picsum.Random200300()
 
@@ -43,8 +35,11 @@ func (app *App) DownloadNRandomPicsFromPicSumHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	internal.RedisFTCREATE("average_color_index", app.cfg.Redis.Client, app.redisIndexPrefix(requestData.IP))
+	//TODO: Ip address as a field since the request is essentially made from the broker(?)
+	redisIndex := internal.NewRedisIndex(requestData.IP, app.redisIndexPrefix(requestData.IP), app.cfg.Redis.Client)
+	redisIndex.FTCREATE()
 
+	d := internal.NewDownloader(app.saveToRedis, app.logger)
 	d.DownloadN(app.cfg.Nats.Client, requestData.IP, requestData.N, picSumRandomPicRequest)
 }
 
@@ -66,8 +61,6 @@ func (app *App) saveToFile(from io.Reader) error {
 	return nil
 }
 
-var ctx_ = context.Background()
-
 func (app *App) saveToRedis(ip string, from io.Reader) {
 	img, err := app.Image(from)
 	if err != nil {
@@ -75,42 +68,9 @@ func (app *App) saveToRedis(ip string, from io.Reader) {
 		return
 	}
 
-	ac := averageColor(img)
-	avColorBinary := make([]byte, 8*len(ac))
-	for i, f := range ac {
-		binary.LittleEndian.PutUint64(avColorBinary[i*8:], math.Float64bits(f))
-	}
+	indexPrefix := "img"
 
-	imgBuf := new(bytes.Buffer)
-	err = jpeg.Encode(imgBuf, img, nil)
-	if err != nil {
-		app.logger.PrintError(err, nil)
-		return
-	}
-
-	imgString := base64.StdEncoding.EncodeToString(imgBuf.Bytes())
-
-	data := struct {
-		Img          string `redis:"img"`
-		AverageColor []byte `redis:"average"`
-	}{
-		Img:          imgString,
-		AverageColor: avColorBinary,
-	}
-
-	counterKey := ip + ":counter"
-
-	id, err := app.cfg.Redis.Client.Incr(ctx_, counterKey).Result()
-	if err != nil {
-		app.logger.PrintError(err, nil)
-		return
-	}
-
-	key := fmt.Sprintf("%s:%d", app.redisIndexPrefix(ip), id)
-
-	if err = app.cfg.Redis.Client.HSet(ctx_, key, data).Err(); err != nil {
-		app.logger.PrintError(err, map[string]string{})
-	}
+	_ = internal.SaveToRedis(img, app.cfg.Redis.Client, ip, indexPrefix, averageColor, context.Background())
 }
 
 func (app *App) Image(r io.Reader) (image.Image, error) {
@@ -122,7 +82,7 @@ func (app *App) Image(r io.Reader) (image.Image, error) {
 	return img, nil
 }
 
-func averageColor(img image.Image) [3]float64 {
+func averageColor(img image.Image) ([3]float64, error) {
 	bounds := img.Bounds()
 	r, g, b := 0.0, 0.0, 0.0
 
@@ -134,5 +94,5 @@ func averageColor(img image.Image) [3]float64 {
 	}
 
 	totalPixels := float64(bounds.Max.X * bounds.Max.Y)
-	return [3]float64{r / totalPixels, g / totalPixels, b / totalPixels}
+	return [3]float64{r / totalPixels, g / totalPixels, b / totalPixels}, nil
 }

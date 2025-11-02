@@ -16,11 +16,9 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func SaveToRedis(img image.Image, c *redis.Client, ip, indexPrefix string, indexer func(image.Image) ([3]float64, error), ctx context.Context) error {
-	float64Vector, err := indexer(img)
-	if err != nil {
-		return err
-	}
+func SaveToRedis(img image.Image, c *redis.Client, ip, indexPrefix string, indexer func(image.Image) [3]float64, ctx context.Context) error {
+	float64Vector := indexer(img)
+
 	avColorBinary, err := binaryFloat64bit(float64Vector)
 	if err != nil {
 		return err

@@ -1,10 +1,9 @@
 package main
 
 import (
-	"context"
+	"fmt"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/ChrisShia/jsonlog"
 	"github.com/ChrisShia/serve"
@@ -15,14 +14,23 @@ type Config struct {
 	Port int
 
 	Redis struct {
-		Addr   string
-		Client *redis.Client
+		Addr string
 	}
+
+	mode mode
 }
 
+type mode uint8
+
+const (
+	normal mode = 1 << iota
+	test
+)
+
 type App struct {
-	logger *jsonlog.Logger
-	cfg    Config
+	logger      *jsonlog.Logger
+	cfg         Config
+	redisClient *redis.Client
 }
 
 func main() {
@@ -35,39 +43,17 @@ func main() {
 		cfg:    cfg,
 	}
 
-	//TODO: might have to connect to NATS
-
-	redisClose, err := app.connectToRedis(cfg)
+	closerFunc, err := app.setupTileImageRepository()
 	if err != nil {
 		app.logger.PrintError(err, nil)
 		return
 	}
-	defer redisClose()
+	defer closerFunc()
 
 	err = serve.ListenAndServe(app, app.cfg.Port)
 	if err != nil {
 		app.logger.PrintError(err, nil)
 		return
-	}
-}
-
-func (app *App) connectToRedis(cfg Config) (func(), error) {
-	counts := 0
-	for {
-		client, err := establishRedisConnAndPing(cfg)
-		if err != nil {
-			counts++
-		} else {
-			app.cfg.Redis.Client = client
-			app.logger.PrintInfo("Connected to redis", map[string]string{
-				"addr": cfg.Redis.Addr,
-			})
-			return func() { client.Close() }, nil
-		}
-
-		if counts > 5 {
-			return nil, err
-		}
 	}
 }
 
@@ -79,27 +65,6 @@ func (app *App) Routes() http.Handler {
 	return mux
 }
 
-func establishRedisConnAndPing(cfg Config) (*redis.Client, error) {
-	client, err := redisClient(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	timeout, cancelFunc := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelFunc()
-	if err = client.Ping(timeout).Err(); err != nil {
-		return nil, err
-	}
-
-	return client, nil
-}
-
-func redisClient(cfg Config) (*redis.Client, error) {
-	opt, err := redis.ParseURL(cfg.Redis.Addr)
-	if err != nil {
-		return nil, err
-	}
-
-	client := redis.NewClient(opt)
-	return client, nil
+func redisIndexPrefix(ip string) string {
+	return fmt.Sprintf("img:%s", ip)
 }

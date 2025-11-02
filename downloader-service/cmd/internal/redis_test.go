@@ -32,12 +32,9 @@ func Test_RedisHGetAll(t *testing.T) {
 
 	testImg := testImage()
 
-	expectedAverageColorVector, err := averageColor(testImg)
-	if err != nil {
-		t.Errorf("Error calculating average color: %v", err)
-	}
+	expectedAverageColorVector := averageColor(testImg)
 
-	err = SaveToRedis(testImg, redisClient, ip, indexPrefix, averageColor, context.Background())
+	err := SaveToRedis(testImg, redisClient, ip, indexPrefix, averageColor, context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -68,12 +65,64 @@ func Test_RedisDoFTSearch(t *testing.T) {
 
 	testImg := testImage()
 
-	expectedAverageColorVector, err := averageColor(testImg)
+	expectedAverageColorVector := averageColor(testImg)
+
+	err := SaveToRedis(testImg, redisClient, ip, indexPrefix, averageColor, context.Background())
 	if err != nil {
-		t.Errorf("Error calculating average color: %v", err)
+		t.Error(err)
 	}
 
-	err = SaveToRedis(testImg, redisClient, ip, indexPrefix, averageColor, context.Background())
+	redisDoResult, err := redisIndex.FTSEARCH(expectedAverageColorVector, redisClient)
+	if err != nil {
+		t.Error(err)
+	}
+
+	redisDoResultMap := redisDoResult.(map[interface{}]interface{})
+
+	allResults := redisDoResultMap["results"].([]interface{})
+	firstResult := allResults[0]
+
+	firstResultMap := firstResult.(map[interface{}]interface{})
+	firstResultExtraAttributesMap := firstResultMap["extra_attributes"].(map[interface{}]interface{})
+	actualAverageColor := firstResultExtraAttributesMap["average_color"]
+
+	actualAverageColorFloat64Vector := float64Vector([]byte(actualAverageColor.(string)))
+	for i, f := range actualAverageColorFloat64Vector {
+		if f != expectedAverageColorVector[i] {
+			t.Errorf("expected %v, got %v", expectedAverageColorVector[i], f)
+		}
+	}
+	actualImg := firstResultExtraAttributesMap["img"]
+
+	if actualImg == nil {
+		t.Error("Expected an image")
+	}
+
+	expectedBase64StringImage, _ := imageToBase64String(testImg)
+	actualImgString := actualImg.(string)
+	if expectedBase64StringImage != actualImgString {
+		t.Errorf("expected %v, got %v", expectedBase64StringImage, actualImgString)
+	}
+}
+
+func Test_RedisDoFTSearchApproximate(t *testing.T) {
+	redisClient, closer := redisTestClient()
+	defer closer()
+
+	ip := "0.0.0.0"
+	indexPrefix := fmt.Sprintf("%s:img", ip)
+
+	redisIndex := NewRedisIndex(ip, indexPrefix, redisClient)
+	redisIndex.FTCREATE()
+
+	testImg := testImage()
+
+	expectedAverageColorVector := averageColor(testImg)
+	expectedAverageColorVector[0] += 100
+	expectedAverageColorVector[1] += 100
+	expectedAverageColorVector[2] += 100
+
+	err := SaveToRedis(testImg, redisClient, ip, indexPrefix, averageColor, context.Background())
 	if err != nil {
 		t.Error(err)
 	}
@@ -139,18 +188,19 @@ func redisTestClient() (*redis.Client, func()) {
 	}
 }
 
-func averageColor(img image.Image) ([3]float64, error) {
-	bounds := img.Bounds()
-	r, g, b := 0.0, 0.0, 0.0
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			r1, g1, b1, _ := img.At(x, y).RGBA()
-			r, g, b = r+float64(r1), g+float64(g1), b+float64(b1)
-		}
-	}
-	totalPixels := float64(bounds.Max.X * bounds.Max.Y)
-
-	return [3]float64{r / totalPixels, g / totalPixels, b / totalPixels}, nil
+func averageColor(img image.Image) [3]float64 {
+	//bounds := img.Bounds()
+	//r, g, b := 0.0, 0.0, 0.0
+	//for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+	//	for x := bounds.Min.X; x < bounds.Max.X; x++ {
+	//		r1, g1, b1, a := img.At(x, y).RGBA()
+	//		r, g, b = r+float64(r1), g+float64(g1), b+float64(b1)
+	//	}
+	//}
+	//totalPixels := float64(bounds.Max.X * bounds.Max.Y)
+	//
+	//return [3]float64{r / totalPixels, g / totalPixels, b / totalPixels}
+	return ImageAverageRGB(img)
 }
 
 func testImage() image.Image {
@@ -383,10 +433,7 @@ func Test_RedisFTSearch(t *testing.T) {
 
 	testImg := testImage()
 
-	expectedAverageColorVector, err := averageColor(testImg)
-	if err != nil {
-		t.Errorf("Error calculating average color: %v", err)
-	}
+	expectedAverageColorVector := averageColor(testImg)
 
 	expectedVectorBinaryRepresentation, err := binaryFloat64bit(expectedAverageColorVector)
 	if err != nil {

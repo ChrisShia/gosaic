@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"image"
+	"image/jpeg"
 	"math"
 
 	"github.com/redis/go-redis/v9"
@@ -41,13 +42,17 @@ func (ri *RedisIndex) Image(ac [3]float64) (image.Image, error) {
 }
 
 func base64StringToImage(str string) (image.Image, error) {
-	var p []byte
+	//TODO: p is nil....needs to be allocated memory (?)
+	decodedLen := base64.StdEncoding.DecodedLen(len(str))
+	p := make([]byte, decodedLen)
+
 	_, err := base64.StdEncoding.Decode(p, []byte(str))
 	if err != nil {
 		return nil, err
 	}
 
-	img, _, err := image.Decode(bytes.NewReader(p))
+	//TODO: this needs to be abstracted...we dont have a fixed tile image format..
+	img, err := jpeg.Decode(bytes.NewReader(p))
 	if err != nil {
 		return nil, err
 	}
@@ -63,9 +68,9 @@ func (ri *RedisIndex) FTSEARCH(searchFor [3]float64) (interface{}, error) {
 
 	result, err := ri.Client.Do(context.Background(),
 		"FT.SEARCH", ri.Name,
-		"*=>[KNN 5 @average_color $vec]",
+		"(*)=>[KNN 5 @average_color $vec]",
 		"PARAMS", "2", "vec", searchForBinary,
-		"SORTBY", "average_color",
+		"SORTBY", "__average_color_score",
 		"RETURN", "2", "img", "average_color",
 		"DIALECT", "2",
 	).Result()

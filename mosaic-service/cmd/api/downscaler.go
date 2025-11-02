@@ -2,13 +2,9 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"image"
 	"image/color"
-	"image/png"
 	"io"
-
-	"gocv.io/x/gocv"
 )
 
 func resizeByNearestNeighbour(inputImg image.Image, newWidth int) image.NRGBA {
@@ -30,7 +26,7 @@ func resizeByNearestNeighbour(inputImg image.Image, newWidth int) image.NRGBA {
 	return *out
 }
 
-func resizeByAveragePooling(inputImg image.Image, newWidth int) image.NRGBA {
+func resizeByAveragePooling(inputImg image.Image, newWidth int) image.Image {
 	bounds := inputImg.Bounds()
 	scaleFactor := bounds.Dx() / newWidth
 	x0 := bounds.Min.X / scaleFactor
@@ -68,7 +64,7 @@ func resizeByAveragePooling(inputImg image.Image, newWidth int) image.NRGBA {
 		}
 	}
 
-	return *out
+	return out
 }
 
 func resizeByBilinear(inputImg image.Image, newWidth int) image.NRGBA {
@@ -90,42 +86,42 @@ func resizeByBilinear(inputImg image.Image, newWidth int) image.NRGBA {
 	return *out
 }
 
-func ResizeGoCV(img image.Image, scaleFactor float64, interpolation gocv.InterpolationFlags) (*image.RGBA, error) {
-	encoder := func(w io.Writer, img image.Image) error {
-		return png.Encode(w, img)
-	}
-	imgBytesBuf, err := imageToBuffer(img, encoder)
-	if err != nil {
-		return &image.RGBA{}, err
-	}
-
-	mat, err := gocv.IMDecode(imgBytesBuf.Bytes(), gocv.IMReadColor)
-	if err != nil {
-		return &image.RGBA{}, err
-	}
-
-	resized := gocv.NewMat()
-	err = gocv.Resize(mat, &resized, image.Point{}, scaleFactor, scaleFactor, interpolation)
-	if err != nil {
-		return &image.RGBA{}, err
-	}
-
-	resizedImg, err := resized.ToImage()
-	if err != nil {
-		return &image.RGBA{}, err
-	}
-
-	var resizedRGBA *image.RGBA
-
-	switch resizedImg.(type) {
-	case *image.RGBA:
-		resizedRGBA = resizedImg.(*image.RGBA)
-	default:
-		return nil, errors.New("resized image is not a NRGBA")
-	}
-
-	return resizedRGBA, nil
-}
+//func ResizeGoCV(img image.Image, scaleFactor float64, interpolation gocv.InterpolationFlags) (*image.RGBA, error) {
+//	encoder := func(w io.Writer, img image.Image) error {
+//		return png.Encode(w, img)
+//	}
+//	imgBytesBuf, err := imageToBuffer(img, encoder)
+//	if err != nil {
+//		return &image.RGBA{}, err
+//	}
+//
+//	mat, err := gocv.IMDecode(imgBytesBuf.Bytes(), gocv.IMReadColor)
+//	if err != nil {
+//		return &image.RGBA{}, err
+//	}
+//
+//	resized := gocv.NewMat()
+//	err = gocv.Resize(mat, &resized, image.Point{}, scaleFactor, scaleFactor, interpolation)
+//	if err != nil {
+//		return &image.RGBA{}, err
+//	}
+//
+//	resizedImg, err := resized.ToImage()
+//	if err != nil {
+//		return &image.RGBA{}, err
+//	}
+//
+//	var resizedRGBA *image.RGBA
+//
+//	switch resizedImg.(type) {
+//	case *image.RGBA:
+//		resizedRGBA = resizedImg.(*image.RGBA)
+//	default:
+//		return nil, errors.New("resized image is not a NRGBA")
+//	}
+//
+//	return resizedRGBA, nil
+//}
 
 func imageToBuffer(img image.Image, encoder func(io.Writer, image.Image) error) (*bytes.Buffer, error) {
 	imgBuf := new(bytes.Buffer)

@@ -1,17 +1,19 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/ChrisShia/mosaic/cmd/internal"
 )
 
 func Test_Mosaic(t *testing.T) {
@@ -19,9 +21,9 @@ func Test_Mosaic(t *testing.T) {
 		return png.Decode(file)
 	}
 
-	img := Image("../../test_image_700.png", decode)
+	img := internal.ImageDecodeFunc("../../../test_image_700.png", decode)
 
-	mosaic, err := NewMosaicBuilder(mockTileRepository_, img, 20).Mosaic()
+	mosaic, err := NewMosaicBuilder(mockWithAverageInfiniteTileRepository_, img, 10).Mosaic()
 	if err != nil {
 		t.Fatal(err)
 		return
@@ -47,7 +49,7 @@ func Test_combineSectorImages(t *testing.T) {
 	nrgbaImg := image.NewNRGBA(bounds)
 
 	gi := &gridImage{img: nrgbaImg}
-	b := &builder{tiles: mockInfiniteTileRepository_, originalImg: gi, tileWidth: 20, tileWidthFloat: float64(20), mosaicImg: gi}
+	b := &builder{tiles: mockRandomInfiniteTileRepository_, originalImg: gi, tileWidth: 20, tileWidthFloat: float64(20), mosaicImg: gi}
 
 	c1 := b.sectorWorker(bounds.Min.X, bounds.Min.Y, bounds.Max.X/2, bounds.Max.Y/2)
 	c2 := b.sectorWorker(bounds.Max.X/2, bounds.Min.Y, bounds.Max.X, bounds.Max.Y/2)
@@ -209,19 +211,52 @@ func (gi *gridImage) Grid(tileWidth int) {
 	}
 }
 
-type MockInfiniteTileRepository struct {
+type MockRandomInfiniteTileRepository struct {
 	images []image.Image
 	len    int
 }
 
-func (mi *MockInfiniteTileRepository) Image(ac [3]float64) (image.Image, error) {
-	return mi.Random(), nil
+func (mi *MockRandomInfiniteTileRepository) Image(ac [3]float64) (image.Image, error) {
+	return mi.Random(ac), nil
 }
 
-func (mi *MockInfiniteTileRepository) Random() image.Image {
+func (mi *MockRandomInfiniteTileRepository) Random(ac [3]float64) image.Image {
 	randomIndex := rand.Intn(mi.len)
 
 	return mi.images[randomIndex]
+}
+
+type MockWithAverageInfiniteTileRepository struct {
+	images     []image.Image
+	len        int
+	searchFunc func([3]float64) float64
+}
+
+func (m *MockWithAverageInfiniteTileRepository) Image(ac [3]float64) (image.Image, error) {
+	randomIndex := rand.Intn(m.len)
+
+	searchAverage := m.searchFunc(ac)
+
+	increment := func(i int) int {
+		if i == m.len-1 {
+			return 0
+		}
+		return i + 1
+	}
+
+	for i := increment(randomIndex); ; i = increment(i) {
+		img := m.images[i]
+		imgAve := internal.ImageAverageRGB(img)
+		if math.Abs(m.searchFunc(imgAve)-searchAverage) < 10 {
+			return img, nil
+		}
+
+		if i == randomIndex {
+			break
+		}
+	}
+
+	return m.images[randomIndex], nil
 }
 
 type MockTileRepository struct {
@@ -239,15 +274,27 @@ func (m *MockTileRepository) Image(ac [3]float64) (image.Image, error) {
 }
 
 var mockTileRepository_ = NewMockTileRepository()
-var mockInfiniteTileRepository_ = NewMockInfiniteTileRepository()
+var mockRandomInfiniteTileRepository_ = NewMockRandomInfiniteTileRepository()
+var mockWithAverageInfiniteTileRepository_ = NewMockWithAverageInfiniteTileRepository()
 
-func NewMockTileRepository() TileRepository {
+func NewMockTileRepository() internal.TileRepository {
 	return &MockTileRepository{images: images()}
 }
 
-func NewMockInfiniteTileRepository() TileRepository {
+func NewMockRandomInfiniteTileRepository() internal.TileRepository {
 	list := images()
-	return &MockInfiniteTileRepository{images: list, len: len(list)}
+	return &MockRandomInfiniteTileRepository{images: list, len: len(list)}
+}
+
+func NewMockWithAverageInfiniteTileRepository() internal.TileRepository {
+	list := images()
+	return &MockWithAverageInfiniteTileRepository{
+		images: list,
+		len:    len(list),
+		searchFunc: func(c [3]float64) float64 {
+			return math.Sqrt(c[0]*c[0] + c[1]*c[1] + c[2]*c[2])
+		},
+	}
 }
 
 func images() []image.Image {
@@ -263,40 +310,8 @@ func images() []image.Image {
 	}
 
 	for _, dirEntry := range dirEntries {
-		img := Image(filepath.Join("../../../Downloads", dirEntry.Name()), decode)
+		img := internal.ImageDecodeFunc(filepath.Join("../../../Downloads", dirEntry.Name()), decode)
 		list = append(list, img)
 	}
 	return list
-}
-
-func imageAverageRGB(img image.Image) [3]float64 {
-	bounds := img.Bounds()
-	return AverageRGBAt(img, bounds.Min.X, bounds.Max.X, bounds.Min.Y, bounds.Max.Y)
-}
-
-func Image(path string, decode func(file *os.File) (image.Image, error)) image.Image {
-	file, err := os.Open(path)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
-
-	img, err := decode(file)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return img
-}
-
-func ImageBufferForTestImage(path string, decoder func(file *os.File) (image.Image, error)) (*bytes.Buffer, error) {
-	originalImg := Image(path, decoder)
-	bs := make([]byte, 0)
-	imgBuf := bytes.NewBuffer(bs)
-
-	err := png.Encode(imgBuf, originalImg)
-	if err != nil {
-		return nil, err
-	}
-
-	return imgBuf, nil
 }

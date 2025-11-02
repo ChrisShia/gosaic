@@ -6,27 +6,22 @@ import (
 	"image/draw"
 	"sync"
 
-	"gocv.io/x/gocv"
+	"github.com/ChrisShia/mosaic/cmd/internal"
 )
 
-type TileRepository interface {
-	Image(ac [3]float64) (image.Image, error)
-}
+var (
+	ErrInvalidTilesRepository = errors.New("invalid tiles repository")
+)
 
 type builder struct {
-	tiles          TileRepository
+	tiles          internal.TileRepository
 	originalImg    image.Image
 	tileWidth      int
 	tileWidthFloat float64
 	mosaicImg      draw.Image
 }
 
-var (
-	ErrInvalidTilesRepository = errors.New("invalid tiles repository")
-)
-
-func NewMosaicBuilder(tiles TileRepository, originalImg image.Image, tileWidth int) *builder {
-
+func NewMosaicBuilder(tiles internal.TileRepository, originalImg image.Image, tileWidth int) *builder {
 	return &builder{
 		tiles:          tiles,
 		originalImg:    originalImg,
@@ -43,7 +38,7 @@ func (b *builder) Mosaic() (image.Image, error) {
 
 	b.mosaic()
 
-	return nil, nil
+	return b.mosaicImg, nil
 }
 
 func (b *builder) mosaic() {
@@ -140,29 +135,35 @@ type drawer interface {
 	draw.Image
 }
 
-func (b *builder) putTileAt(sp point, dst drawer) (rect, error) {
+func (b *builder) putTileAt(sp point, dst drawer) (*rect, error) {
 	r := rect{Min: sp, Max: sp.Add(point{X: b.tileWidth, Y: b.tileWidth})}
 
 	imageFromRepository, err := b.findImageByAverageColor(r)
+	if err != nil {
+		return nil, err
+	}
 
 	resizedImg, err := resize(b.tileWidthFloat, imageFromRepository)
+	if err != nil {
+		return nil, err
+	}
 
 	paintedRectangle := b.drawTileAtXY(resizedImg, sp, dst)
 
-	return paintedRectangle, err
+	return &paintedRectangle, nil
 }
 
-func (b *builder) drawTileAtXY(resizedImg image.Image, sp image.Point, sectorImg drawer) image.Rectangle {
-	tileBounds := resizedImg.Bounds()
+func (b *builder) drawTileAtXY(src image.Image, sp image.Point, dst drawer) image.Rectangle {
+	tileBounds := src.Bounds()
 	tileBoundsInOriginalFrame := rect{Min: sp, Max: sp.Add(tileBounds.Max)}
 
-	b.drawTile(resizedImg, tileBoundsInOriginalFrame, sectorImg)
+	b.drawTile(src, tileBoundsInOriginalFrame, dst)
 
 	return tileBoundsInOriginalFrame
 }
 
 func (b *builder) findImageByAverageColor(r rect) (image.Image, error) {
-	color := AverageRGBAt(b.originalImg, r.Min.X, r.Max.X, r.Min.Y, r.Max.Y)
+	color := internal.AverageRGBArea(b.originalImg, r.Min.X, r.Max.X, r.Min.Y, r.Max.Y)
 
 	imgFromTileRepository, err := b.tiles.Image(color)
 	if err != nil {
@@ -180,44 +181,14 @@ func (b *builder) drawTile(tileImg image.Image, r image.Rectangle, sectorImg dra
 	draw.Draw(sectorImg, r, tileImg, zeroPoint, draw.Src)
 }
 
-func resize(newWidth float64, img image.Image) (*image.RGBA, error) {
-	bounds := img.Bounds()
-	scaleFactor := newWidth / float64(bounds.Dx())
-	t, err := ResizeGoCV(img, scaleFactor, gocv.InterpolationArea)
-	if err != nil {
-		return nil, err
-	}
+func resize(newWidth float64, img image.Image) (image.Image, error) {
+	//bounds := img.Bounds()
+	//scaleFactor := newWidth / float64(bounds.Dx())
+	t := resizeByAveragePooling(img, int(newWidth))
+	//t, err := ResizeGoCV(img, scaleFactor, gocv.InterpolationArea)
+	//if err != nil {
+	//	return nil, err
+	//}
 
 	return t, nil
-}
-
-func AverageRGBAt(img image.Image, xMin, xMax, yMin, yMax int) [3]float64 {
-	var rSum, gSum, bSum uint64
-	var count uint64
-
-	for yy := yMin; yy < yMax; yy++ {
-		for xx := xMin; xx < xMax; xx++ {
-			r, g, b, _ := img.At(xx, yy).RGBA()
-			rSum += uint64(r >> 8)
-			gSum += uint64(g >> 8)
-			bSum += uint64(b >> 8)
-			count++
-		}
-	}
-
-	if count == 0 {
-		return [3]float64{0, 0, 0}
-	}
-
-	rAve := float64(rSum) / float64(count)
-	gAve := float64(gSum) / float64(count)
-	bAve := float64(bSum) / float64(count)
-
-	return [3]float64{rAve, gAve, bAve}
-}
-
-func RGBAt(img image.Image, x int, y int) [3]float64 {
-	r, g, b, _ := img.At(x, y).RGBA()
-	color := [3]float64{float64(r), float64(g), float64(b)}
-	return color
 }

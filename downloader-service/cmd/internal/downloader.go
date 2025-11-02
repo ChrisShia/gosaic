@@ -23,7 +23,7 @@ type Downloader struct {
 	quit   chan struct{}
 }
 
-func NewDownloader(save func(string, io.Reader), logger *jsonlog.Logger) *Downloader {
+func NewDownloader(save func(string, string, io.Reader), logger *jsonlog.Logger) *Downloader {
 	return &Downloader{
 		By:     http.Client{},
 		To:     save,
@@ -31,7 +31,7 @@ func NewDownloader(save func(string, io.Reader), logger *jsonlog.Logger) *Downlo
 	}
 }
 
-type To func(key string, input io.Reader)
+type To func(ip, key string, input io.Reader)
 
 func (d *Downloader) listenForOsSignals() {
 	c := make(chan os.Signal, 1)
@@ -50,14 +50,14 @@ func (d *Downloader) listenForOsSignals() {
 // TODO:
 // Add error return to mitigate errors, since errors may occur but the http response
 // does not show anything.
-func (d *Downloader) DownloadN(natsClient *nats.Conn, requestorIp string, n int, request *http.Request) {
+func (d *Downloader) DownloadN(natsClient *nats.Conn, requestorIp, indexPrefix string, n int, request *http.Request) {
 	wg := &sync.WaitGroup{}
 	wg.Add(n)
 
 	_, err := natsClient.Subscribe("downloads", func(msg *nats.Msg) {
 		go func() {
 			defer wg.Done()
-			d.Store(requestorIp, msg.Data)
+			d.Store(requestorIp, indexPrefix, msg.Data)
 		}()
 	})
 	if err != nil {
@@ -116,7 +116,7 @@ func (d *Downloader) Get(nc *nats.Conn, req *http.Request) {
 	}
 }
 
-func (d *Downloader) Store(key string, bs []byte) {
+func (d *Downloader) Store(ip, key string, bs []byte) {
 	dataReader := bytes.NewReader(bs)
 
 	if dataReader.Len() == 0 {
@@ -124,5 +124,5 @@ func (d *Downloader) Store(key string, bs []byte) {
 		return
 	}
 
-	d.To(key, dataReader)
+	d.To(ip, key, dataReader)
 }

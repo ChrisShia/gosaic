@@ -36,11 +36,12 @@ func (app *App) DownloadNRandomPicsFromPicSumHandler(w http.ResponseWriter, r *h
 	}
 
 	//TODO: Ip address as a field since the request is essentially made from the broker(?)
-	redisIndex := internal.NewRedisIndex(requestData.IP, app.redisIndexPrefix(requestData.IP), app.cfg.Redis.Client)
+	requestorIndexPrefix := app.redisIndexPrefix(requestData.IP)
+	redisIndex := internal.NewRedisIndex(requestData.IP, requestorIndexPrefix, app.cfg.Redis.Client)
 	redisIndex.FTCREATE()
 
 	d := internal.NewDownloader(app.saveToRedis, app.logger)
-	d.DownloadN(app.cfg.Nats.Client, requestData.IP, requestData.N, picSumRandomPicRequest)
+	d.DownloadN(app.cfg.Nats.Client, requestData.IP, requestorIndexPrefix, requestData.N, picSumRandomPicRequest)
 }
 
 func (app *App) saveToFile(from io.Reader) error {
@@ -61,16 +62,14 @@ func (app *App) saveToFile(from io.Reader) error {
 	return nil
 }
 
-func (app *App) saveToRedis(ip string, from io.Reader) {
+func (app *App) saveToRedis(ip, key string, from io.Reader) {
 	img, err := app.Image(from)
 	if err != nil {
 		app.logger.PrintError(err, nil)
 		return
 	}
 
-	indexPrefix := "img"
-
-	_ = internal.SaveToRedis(img, app.cfg.Redis.Client, ip, indexPrefix, averageColor, context.Background())
+	_ = internal.SaveToRedis(img, app.cfg.Redis.Client, ip, key, internal.ImageAverageRGB, context.Background())
 }
 
 func (app *App) Image(r io.Reader) (image.Image, error) {
@@ -80,19 +79,4 @@ func (app *App) Image(r io.Reader) (image.Image, error) {
 	}
 
 	return img, nil
-}
-
-func averageColor(img image.Image) ([3]float64, error) {
-	bounds := img.Bounds()
-	r, g, b := 0.0, 0.0, 0.0
-
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			r1, g1, b1, _ := img.At(x, y).RGBA()
-			r, g, b = r+float64(r1), g+float64(g1), b+float64(b1)
-		}
-	}
-
-	totalPixels := float64(bounds.Max.X * bounds.Max.Y)
-	return [3]float64{r / totalPixels, g / totalPixels, b / totalPixels}, nil
 }
